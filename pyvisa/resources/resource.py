@@ -25,24 +25,33 @@ from .. import highlevel
 from .. import attributes
 
 
-class WaitResponse(object):
+class Event(object):
     """Class used in return of wait_on_event. It properly closes the context upon delete.
        A call with event_type of 0 (normally used when timed_out is True) will be
        recorded as None, otherwise it records the proper EventType enum.
     """
-    def __init__(self, event_type, context, ret, visalib, timed_out=False):
+
+    def __init__(self, event_type, context, ret, visalib, timed_out=False, owned=True):
         if event_type == 0:
             self.event_type = None
         else:
             self.event_type = constants.EventType(event_type)
-        self.context = context
+        self._context = context
         self.ret = ret
         self._visalib = visalib
         self.timed_out = timed_out
+        self._owned = owned
 
     def __del__(self):
-        if self.context != None:
-            self._visalib.close(self.context)
+        self.close()
+
+    def close(self):
+        if self._context != None and self._owned:
+            self._visalib.close(self._context)
+            self._owned = False
+
+    def get_attribute(self, attr):
+        return self._visalib.get_attribute(self._context, attr)
 
 
 class Resource(object):
@@ -342,9 +351,9 @@ class Resource(object):
             event_type, context, ret = self.visalib.wait_on_event(self.session, in_event_type, timeout)
         except errors.VisaIOError as exc:
             if capture_timeout and exc.error_code == constants.StatusCode.error_timeout:
-                return WaitResponse(in_event_type, None, exc.error_code, self.visalib, timed_out=True)
+                return Event(in_event_type, None, exc.error_code, self.visalib, timed_out=True)
             raise
-        return WaitResponse(event_type, context, ret, self.visalib)
+        return Event(event_type, context, ret, self.visalib)
 
     def lock(self, timeout='default', requested_key=None):
         """Establish a shared lock to the resource.
